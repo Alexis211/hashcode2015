@@ -1,4 +1,6 @@
 #include <utility>
+#include <future>
+#include <chrono>
 
 #include "main.hpp"
 
@@ -141,16 +143,19 @@ vector<string> solve2_int(const vector< vector<bool> > &data, int p1, int p2) {
 }
 
 vector<string> solve2(const vector< vector<bool> > &data) {
-	vector<string> sol;
+
+	vector<future<vector<string>>> tasks;
 
 	for (int p1 = 2; p1 < 4; p1 += 1) {
 		for (int p2 = 1; p2 < 8; p2++) {
-			fprintf(stderr, "%d %d ", p1, p2);
-			if (p1 == 1 && p2 == 1) continue;
-			auto sol2 = solve2_int(data, p1, p2);
-			fprintf(stderr, " -> %d\n", sol2.size());
-			if (sol.empty() || sol2.size() < sol.size()) sol = sol2;
+			tasks.push_back(async(launch::async, solve2_int, data, p1, p2));
 		}
+	}
+
+	vector<string> sol;
+	for (int i = 0; i < tasks.size(); i++) {
+		auto x = tasks[i].get();
+		if (sol.empty() || x.size() < sol.size()) sol = x;
 	}
 
 	return sol;

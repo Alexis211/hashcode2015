@@ -3,7 +3,7 @@ CFLAGS += -std=c11 -O3 -g -flto
 CXX = g++
 CXXFLAGS += -O3 -std=c++11 -g -flto
 LD = g++
-LDFLAGS += -lm -O3 -flto -g
+LDFLAGS += -lm -lpthread -O3 -flto -g
 
 all: $(OUT) $(TGZ)
 
