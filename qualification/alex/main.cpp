@@ -145,7 +145,9 @@ struct drone_status {
 
 	void move(int xx, int yy) {
 		int dx = x-xx, dy = y-yy;
-		t += ceil(sqrt(dx*dx+dy*dy));
+		int dt = ceil(sqrt(dx*dx+dy*dy)); 
+		fprintf(stderr, "%d %d -> %d %d (%d + %d)\n", x, y, xx, yy, t, dt);
+		t += dt;
 		x = xx;
 		y = yy;
 	}
@@ -155,6 +157,7 @@ struct drone_status {
 		if (u > p.U) fprintf(stderr, "Too much load (%d/%d)\n", u, p.U);
 		// do stuff
 		t++;
+		fprintf(stderr, "load->%d\n", t);
 		qp[pi] += q;
 	}
 	void unload(const problem &p, int pi, int q) {
@@ -162,6 +165,7 @@ struct drone_status {
 		if (q > qp[pi]) fprintf(stderr, "Not enough %d on drone (have %d/%d)\n", pi, qp[pi], q);
 
 		t++;
+		fprintf(stderr, "unload->%d\n", t);
 		qp[pi] -= q;
 	}
 };
@@ -229,21 +233,30 @@ struct status {
 	}
 
 	void simu(int t_lim, bool stop_when_free) {
-		auto qu = priority_queue<int, std::vector<int>, drone_status_compare>(drone_status_compare(drone));
-		for (int i = 0; i < p.D; i++) {
-			if (drone[i].i < s.dcmd[i].size()) qu.push(i);
-		}
-
-		while (!qu.empty()) {
-			int t = drone[qu.top()].t;
-			if (t >= t_lim) break;
-			if (stop_when_free && qu.size() < p.D) break;
+		while (true) {
+			int t = t_lim;
+			for (int i = 0; i < p.D; i++) {
+				fprintf(stderr, "(%d %d %d %d %s)", i, drone[i].t, drone[i].i, s.dcmd[i].size(), (stop_when_free?"!":"."));
+				if (drone[i].i == s.dcmd[i].size() && stop_when_free) {
+					fprintf(stderr, "Stopping simu, %i is free\n", i);
+					return;
+				}
+				if (drone[i].i < s.dcmd[i].size()) {
+					if (t == -1 || drone[i].t < t) t = drone[i].t;
+				}
+			}
+			if (t >= t_lim) {
+				fprintf(stderr, "Stopping simu, we are at t=%d\n", t);
+				return;
+			}
 
 			vector<int> di;
-			while (drone[qu.top()].t == t) {
-				di.push_back(qu.top());
-				qu.pop();
+			for (int i = 0; i < p.D; i++) {
+				if (drone[i].t == t && drone[i].i < s.dcmd[i].size()) di.push_back(i);
 			}
+			fprintf(stderr, "Simu at %d : %d actions [", t, di.size());
+			for (auto i: di) fprintf(stderr, "%d ", i);
+			fprintf(stderr, "]\n");
 
 			// Do all the unloads
 			for (auto i: di) {
@@ -283,11 +296,6 @@ struct status {
 					drone[i].i++;
 				}
 			}
-
-			// Put all the drones back on the queue
-			for (auto i: di) {
-				if (drone[i].i < s.dcmd[i].size()) qu.push(i);
-			}
 		}
 	}
 
@@ -321,10 +329,18 @@ solution solve(const problem &p) {
 
 	vector<bool> order_done(p.O, false);
 
+	vector<vector<int>> wh_free;
+	for (int i = 0; i < p.W; i++) {
+		wh_free.push_back(st.wh[i].qp);
+	}
+
 	while (true) {
 		st.simu_until_any_free();
 		vector<int> a = st.avail_drones();
-		if (a.size() == 0) break;
+		if (a.size() == 0) {
+			fprintf(stderr, "Nobody free...\n");
+			break;
+		}
 
 		int di = a.front();
 
@@ -346,7 +362,7 @@ solution solve(const problem &p) {
 			for (int iw = 0; iw < p.W; iw++) {
 				// check warehouse iw can satisfy order io
 				bool ok = true;
-				for (int i = 0; i < p.P; i++) if (st.wh[iw].qp[i] < st.order[io].qp[i]) ok = false;
+				for (int i = 0; i < p.P; i++) if (wh_free[iw][i] < st.order[io].qp[i]) ok = false;
 				if (!ok) continue;
 
 				int dx1 = p.wh[iw].x - st.drone[di].x, dy1 = p.wh[iw].y - st.drone[di].y;
@@ -363,11 +379,139 @@ solution solve(const problem &p) {
 		if (best_dist == -1) break;
 
 		// Deliver order best_o by using drone di picking stuff from warehouse best_w
+		fprintf(stderr, "Doing order %d by wh %d drone %d\n", best_o, best_w, di);
 		for (int i = 0; i < p.P; i++) {
 			if (st.order[best_o].qp[i] > 0) s.dcmd[di].push_back(cmd::load(best_w, i, st.order[best_o].qp[i]));
+			wh_free[best_w][i] -= st.order[best_o].qp[i];
 		}
+
+
 		for (int i = 0; i < p.P; i++) {
 			if (st.order[best_o].qp[i] > 0) s.dcmd[di].push_back(cmd::deliver(best_o, i, st.order[best_o].qp[i]));
+		}
+		order_done[best_o] = true;
+	}
+
+	st.simu_all();
+	// Remove commands that go beyond the allocated time
+	for (int i = 0; i < p.D; i++) {
+		if (st.drone[i].t >= p.T) {
+			while(s.dcmd[i].size() >= st.drone[i].i) s.dcmd[i].pop_back();
+		}
+	}
+
+	return s;
+}
+
+solution solve2(const problem &p) {
+	solution s(p);
+
+	status st = status(p, s);
+
+	vector<bool> order_done(p.O, false);
+
+	vector<vector<int>> wh_free;
+	for (int i = 0; i < p.W; i++) {
+		wh_free.push_back(st.wh[i].qp);
+	}
+	vector<vector<int>> dr_cmd_loaded(p.D, vector<int>());
+	vector<int> dr_load(p.D, 0);
+
+	// remove orders we cannot do in one go
+	for (int io = 0; io < p.O; io++) {
+		int w = 0;
+		for (auto i: p.orders[io].ip) w += p.up[i];
+		if (w > p.U) {
+			order_done[io] = true;
+			continue;
+		}
+	}
+
+	// do stuff
+	while (true) {
+		st.simu_until_any_free();
+		vector<int> a = st.avail_drones();
+		if (a.size() == 0) break;
+
+		// check the nearest thing we can do between loading an order and delivering an order
+		int c_dist = -1;
+		int c_deliver = -1;
+		int c_load = -1;
+		int c_di = -1;
+		for (auto di: a) {
+			for (auto o: dr_cmd_loaded[di]) {
+				int dx = p.orders[o].x - st.drone[di].x, dy = p.orders[o].y - st.drone[di].y;
+				int dist = ceil(sqrt(dx*dx+dy*dy));
+				if (dist < c_dist || c_dist == -1) {
+					c_dist = dist;
+					c_deliver = o;
+					c_di = di;
+				}
+			}
+		}
+		int c_subdist = -1;
+		int c_load_w = -1;
+		for (auto di: a) {
+			for (int io = 0; io < p.O; io++) {
+				if (order_done[io]) continue;
+
+				// check order can be loaded by drone
+				int w = dr_load[di];
+				for (auto i: p.orders[io].ip) w += p.up[i];
+				if (w > p.U) {
+					continue;
+				}
+
+				for (int iw = 0; iw < p.W; iw++) {
+					// check warehouse iw can satisfy order io
+					bool ok = true;
+					for (int i = 0; i < p.P; i++) if (wh_free[iw][i] < st.order[io].qp[i]) ok = false;
+					if (!ok) continue;
+
+					int dx1 = p.wh[iw].x - st.drone[di].x, dy1 = p.wh[iw].y - st.drone[di].y;
+					int dx2 = p.wh[iw].x - p.orders[io].x, dy2 = p.wh[iw].y - p.orders[io].y;
+					int dist = ceil(sqrt(dx1*dx1+dy1*dy1));
+					int subdist = ceil(sqrt(dx2*dx2+dy2*dy2));
+					if (c_dist == -1 || dist < c_dist || (dist == c_dist && (c_subdist == -1 || subdist < c_subdist))) {
+						c_dist = dist;
+						c_subdist = subdist;
+						c_deliver = -1;
+						c_load = io;
+						c_load_w = iw;
+						c_di = di;
+					}
+				}
+			}
+		}
+		int di = c_di;
+
+		// if we chose to deliver
+		if (c_deliver != -1) {
+			fprintf(stderr, "%d deliver %d\n", di, c_deliver);
+			for (int i = 0; i < p.P; i++) {
+				if (st.order[c_deliver].qp[i] > 0) {
+					s.dcmd[di].push_back(cmd::deliver(c_deliver, i, st.order[c_deliver].qp[i]));
+					dr_load[di] -= st.order[c_deliver].qp[i] * p.up[i];
+				}
+			}
+			for (int i = 0; i < dr_cmd_loaded[di].size(); i++) {
+				if (dr_cmd_loaded[di][i] == c_deliver) {
+					dr_cmd_loaded[di][i] = dr_cmd_loaded[di].back();
+					dr_cmd_loaded[di].pop_back();
+					break;
+				}
+			}
+		} else if (c_load != -1) {
+			fprintf(stderr, "%d pick up %d at %d\n", di, c_load, c_load_w);
+			for (int i = 0; i < p.P; i++) {
+				if (st.order[c_load].qp[i] > 0) s.dcmd[di].push_back(cmd::load(c_load_w, i, st.order[c_load].qp[i]));
+				wh_free[c_load_w][i] -= st.order[c_load].qp[i];
+				dr_load[di] += st.order[c_load].qp[i] * p.up[i];
+			}
+			dr_cmd_loaded[di].push_back(c_load);
+			order_done[c_load] = true;
+		} else {
+			break;
 		}
 	}
 
@@ -385,7 +529,7 @@ solution solve(const problem &p) {
 int main() {
 	problem p = read_problem();
 
-	solution s = solve(p);
+	solution s = solve2(p);
 
 	// simulate
 	fprintf(stderr, "Checking solution...\n");
