@@ -112,7 +112,7 @@ struct solution {
 
 	vector< vector<cmd> > dcmd;		// for each drone, a list of the commands it has to do
 
-	solution(const problem &_p) : p(_p) {}
+	solution(const problem &_p) : p(_p), dcmd(p.D, vector<cmd>()) {}
 
 	void print() {
 		int s = 0;
