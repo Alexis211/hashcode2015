@@ -1,0 +1,29 @@
+CC = gcc
+CFLAGS += -std=c11 -O3 -g -flto
+CXX = g++
+CXXFLAGS += -O3 -std=c++11 -g -flto
+LD = g++
+LDFLAGS += -lm -O3 -flto -g
+
+all: $(OUT) $(TGZ)
+
+$(OUT): $(OBJ)
+	$(LD) $(LDFLAGS) -o $@ $^
+
+%.o: %.c
+	$(CC) -c $< -o $@ $(CFLAGS)
+
+%.o: %.cpp
+	$(CXX) -c $< -o $@ $(CXXFLAGS)
+
+clean:
+	rm *.o */*.o || true
+mrproper: clean
+	rm $(TGZ) || true
+	rm $(OUT) || true
+
+rebuild: mrproper all
+
+$(TGZ): $(SRCFILES)
+	tar -czf $@ $^
+
