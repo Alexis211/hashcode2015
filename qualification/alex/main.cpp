@@ -58,6 +58,7 @@ problem read_problem() {
 		for (int j = 0; j < p.P; j++) {
 			scanf("%d ", &w.qp[j]);
 		}
+		p.wh.push_back(w);
 	}
 
 	scanf("%d\n", &p.O);
@@ -68,6 +69,7 @@ problem read_problem() {
 		for (int j = 0; j < o.P; j++) {
 			scanf("%d ", &o.ip[j]);
 		}
+		p.orders.push_back(o);
 	}
 
 	return p;
