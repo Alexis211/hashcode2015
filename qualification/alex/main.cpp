@@ -226,7 +226,7 @@ struct status {
 		score = 0;
 	}
 
-	int simu() {
+	void simu(int t_lim, bool stop_when_free) {
 		auto qu = priority_queue<int, std::vector<int>, drone_status_compare>(drone_status_compare(drone));
 		for (int i = 0; i < p.D; i++) {
 			if (drone[i].i < s.dcmd[i].size()) qu.push(i);
@@ -234,6 +234,9 @@ struct status {
 
 		while (!qu.empty()) {
 			int t = drone[qu.top()].t;
+			if (t >= t_lim) break;
+			if (stop_when_free && qu.size() < p.D) break;
+
 			vector<int> di;
 			while (drone[qu.top()].t == t) {
 				di.push_back(qu.top());
@@ -285,6 +288,26 @@ struct status {
 			}
 		}
 	}
+
+	void simu_until_any_free(){
+		simu(p.T, true);
+	}
+
+	void simu_all() {
+		simu(p.T, false);
+
+		for (int i = 0; i < p.D; i++) {
+			if (drone[i].i < s.dcmd[i].size()) fprintf(stderr, "Drone %d still has commands...\n", i);
+		}
+	}
+	
+	vector<int> avail_drones() {
+		vector<int> ret;
+		for (int i = 0; i < p.D; i++) {
+			if (drone[i].i == s.dcmd[i].size()) ret.push_back(i);
+		}
+		return ret;
+	}
 };
 
 // =========== SOLVE THE PROBLEM =======
@@ -292,7 +315,67 @@ struct status {
 solution solve(const problem &p) {
 	solution s(p);
 
-	// TODO
+	status st = status(p, s);
+
+	vector<bool> order_done(p.O, false);
+
+	while (true) {
+		st.simu_until_any_free();
+		vector<int> a = st.avail_drones();
+		if (a.size() == 0) break;
+
+		int di = a.front();
+
+		int best_dist = -1;
+		int best_o = -1;
+		int best_w = -1;
+
+		for (int io = 0; io < p.O; io++) {
+			if (order_done[io]) continue;
+
+			// check order can be done by only one go
+			int w = 0;
+			for (auto i: p.orders[io].ip) w += p.up[i];
+			if (w > p.U) {
+				order_done[io] = true;
+				continue;
+			}
+
+			for (int iw = 0; iw < p.W; iw++) {
+				// check warehouse iw can satisfy order io
+				bool ok = true;
+				for (int i = 0; i < p.P; i++) if (st.wh[iw].qp[i] < st.order[io].qp[i]) ok = false;
+				if (!ok) continue;
+
+				int dx1 = p.wh[iw].x - st.drone[di].x, dy1 = p.wh[iw].y - st.drone[di].y;
+				int dx2 = p.wh[iw].x - p.orders[io].x, dy2 = p.wh[iw].y - p.orders[io].y;
+				int dist = ceil(sqrt(dx1*dx1+dy1*dy1))+ceil(sqrt(dx2*dx2+dy2*dy2));
+				if (best_dist == -1 || dist < best_dist) {
+					best_dist = dist;
+					best_o = io;
+					best_w = iw;
+				}
+			}
+		}
+
+		if (best_dist == -1) break;
+
+		// Deliver order best_o by using drone di picking stuff from warehouse best_w
+		for (int i = 0; i < p.P; i++) {
+			if (st.order[best_o].qp[i] > 0) s.dcmd[di].push_back(cmd::load(best_w, i, st.order[best_o].qp[i]));
+		}
+		for (int i = 0; i < p.P; i++) {
+			if (st.order[best_o].qp[i] > 0) s.dcmd[di].push_back(cmd::deliver(best_o, i, st.order[best_o].qp[i]));
+		}
+	}
+
+	st.simu_all();
+	// Remove commands that go beyond the allocated time
+	for (int i = 0; i < p.D; i++) {
+		if (st.drone[i].t >= p.T) {
+			while(s.dcmd[i].size() >= st.drone[i].i) s.dcmd[i].pop_back();
+		}
+	}
 
 	return s;
 }
@@ -303,9 +386,10 @@ int main() {
 	solution s = solve(p);
 
 	// simulate
+	fprintf(stderr, "Checking solution...\n");
 	status st = status(p, s);
-	st.simu();
-	printf("Score: %d\n", st.score);
+	st.simu_all();
+	fprintf(stderr, "Score: %d\n", st.score);
 
 	s.print();
 }
