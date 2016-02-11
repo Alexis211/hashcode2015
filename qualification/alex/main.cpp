@@ -193,89 +193,99 @@ struct order_status {
 	}
 };
 
-int score(const problem &p, const solution &s) {
-	// initialize warehouse status
+struct status {
+	const problem &p;
+	const solution &s;
+
 	vector<wh_status> wh;
-	for (int i = 0; i < p.W; i++) {
-		wh.push_back(wh_status(p.wh[i].qp));
-	}
-
-	// initialize order status
 	vector<order_status> order;
-	for (int i = 0; i < p.O; i++) {
-		order.push_back(order_status(vector<int>(p.P, 0)));
-		for (auto pi: p.orders[i].ip) {
-			order.back().qp[pi]++;
-		}
-	}
-
-	// initialize drone status
 	vector<drone_status> drone;
-	for (int i = 0; i < p.D; i++) {
-		drone.push_back(drone_status(p.wh[0].x, p.wh[0].y, 0, 0, vector<int>(p.P, 0), 0));
+
+	int score;
+
+	status(const problem &_p, const solution &_s) : p(_p), s(_s) {
+		// initialize warehouse status
+		for (int i = 0; i < p.W; i++) {
+			wh.push_back(wh_status(p.wh[i].qp));
+		}
+
+		// initialize order status
+		for (int i = 0; i < p.O; i++) {
+			order.push_back(order_status(vector<int>(p.P, 0)));
+			for (auto pi: p.orders[i].ip) {
+				order.back().qp[pi]++;
+			}
+		}
+
+		// initialize drone status
+		for (int i = 0; i < p.D; i++) {
+			drone.push_back(drone_status(p.wh[0].x, p.wh[0].y, 0, 0, vector<int>(p.P, 0), 0));
+		}
+
+		//initialize score 
+		score = 0;
 	}
 
-	// do the simulation
-	int score = 0;
-
-	auto qu = priority_queue<int, std::vector<int>, drone_status_compare>(drone_status_compare(drone));
-	for (int i = 0; i < p.D; i++) qu.push(i);
-
-	while (!qu.empty()) {
-		int t = drone[qu.top()].t;
-		vector<int> di;
-		while (drone[qu.top()].t == t) {
-			di.push_back(qu.top());
-			qu.pop();
-		}
-
-		// Do all the unloads
-		for (auto i: di) {
-			const cmd &c = s.dcmd[i][drone[i].i];
-			if (c.c == cmd::Unload) {
-				if (drone[i].x == p.wh[c.i].x && drone[i].y == p.wh[c.i].y) {
-					wh[c.i].add(c.pi, c.np);
-					drone[i].unload(p, c.pi, c.np);
-					drone[i].i++;
-				} else {
-					drone[i].move(p.wh[c.i].x, p.wh[c.i].y);
-				}
-			}
-		}
-
-		// Do all the other things
-		for (auto i: di) {
-			const cmd &c = s.dcmd[i][drone[i].i];
-			if (c.c == cmd::Load) {
-				if (drone[i].x == p.wh[c.i].x && drone[i].y == p.wh[c.i].y) {
-					wh[c.i].rm(c.pi, c.np);
-					drone[i].load(p, c.pi, c.np);
-					drone[i].i++;
-				} else {
-					drone[i].move(p.wh[c.i].x, p.wh[c.i].y);
-				}
-			} else if (c.c == cmd::Deliver) {
-				if (drone[i].x == p.orders[c.i].x && drone[i].y == p.orders[c.i].y) {
-					score += order[c.i].deliver(t, p, c.pi, c.np);
-					drone[i].unload(p, c.pi, c.np);
-					drone[i].i++;
-				} else {
-					drone[i].move(p.orders[c.i].x, p.orders[c.i].y);
-				}
-			} else if (c.c == cmd::Wait) {
-				drone[i].t += c.i;
-				drone[i].i++;
-			}
-		}
-
-		// Put all the drones back on the queue
-		for (auto i: di) {
+	int simu() {
+		auto qu = priority_queue<int, std::vector<int>, drone_status_compare>(drone_status_compare(drone));
+		for (int i = 0; i < p.D; i++) {
 			if (drone[i].i < s.dcmd[i].size()) qu.push(i);
 		}
-	}
 
-	return score;
-}
+		while (!qu.empty()) {
+			int t = drone[qu.top()].t;
+			vector<int> di;
+			while (drone[qu.top()].t == t) {
+				di.push_back(qu.top());
+				qu.pop();
+			}
+
+			// Do all the unloads
+			for (auto i: di) {
+				const cmd &c = s.dcmd[i][drone[i].i];
+				if (c.c == cmd::Unload) {
+					if (drone[i].x == p.wh[c.i].x && drone[i].y == p.wh[c.i].y) {
+						wh[c.i].add(c.pi, c.np);
+						drone[i].unload(p, c.pi, c.np);
+						drone[i].i++;
+					} else {
+						drone[i].move(p.wh[c.i].x, p.wh[c.i].y);
+					}
+				}
+			}
+
+			// Do all the other things
+			for (auto i: di) {
+				const cmd &c = s.dcmd[i][drone[i].i];
+				if (c.c == cmd::Load) {
+					if (drone[i].x == p.wh[c.i].x && drone[i].y == p.wh[c.i].y) {
+						wh[c.i].rm(c.pi, c.np);
+						drone[i].load(p, c.pi, c.np);
+						drone[i].i++;
+					} else {
+						drone[i].move(p.wh[c.i].x, p.wh[c.i].y);
+					}
+				} else if (c.c == cmd::Deliver) {
+					if (drone[i].x == p.orders[c.i].x && drone[i].y == p.orders[c.i].y) {
+						score += order[c.i].deliver(t, p, c.pi, c.np);
+						drone[i].unload(p, c.pi, c.np);
+						drone[i].i++;
+					} else {
+						drone[i].move(p.orders[c.i].x, p.orders[c.i].y);
+					}
+				} else if (c.c == cmd::Wait) {
+					drone[i].t += c.i;
+					drone[i].i++;
+				}
+			}
+
+			// Put all the drones back on the queue
+			for (auto i: di) {
+				if (drone[i].i < s.dcmd[i].size()) qu.push(i);
+			}
+		}
+	}
+};
 
 // =========== SOLVE THE PROBLEM =======
 
@@ -292,7 +302,10 @@ int main() {
 
 	solution s = solve(p);
 
-	printf("Score: %d\n", score(p, s));
+	// simulate
+	status st = status(p, s);
+	st.simu();
+	printf("Score: %d\n", st.score);
 
 	s.print();
 }
