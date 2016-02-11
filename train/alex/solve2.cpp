@@ -166,13 +166,14 @@ vector<string> solve2(const vector< vector<bool> > &data) {
 				}
 				auto x = params.back();
 				params.pop_back();
+				fprintf(stderr, "{%d %d / %d}", x.first, x.second, params.size());
 				the_mutex.unlock();
 
 				auto sol = solve2_int(data, x.first, x.second);
 
 				the_mutex.lock();
 				if (best_sol.empty() || sol.size() < best_sol.size()) {
-					fprintf(stderr, "New best: %d %d -> %d\n", x.first, x.second, sol.size());
+					fprintf(stderr, "[!! %d %d -> %d !!]", x.first, x.second, sol.size());
 					best_sol = sol;
 				}
 				the_mutex.unlock();
@@ -187,6 +188,7 @@ vector<string> solve2(const vector< vector<bool> > &data) {
 	for (int i = 0; i < threads.size(); i++) {
 		threads[i].join();
 	}
+	fprintf(stderr, "Done.\n");
 
 	return best_sol;
 }
